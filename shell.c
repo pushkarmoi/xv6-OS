@@ -11,6 +11,190 @@
 
 #define MAXARGS 10
 #define CMD_LEN 150
+#define ALIAS_KEY_LEN 30
+
+/*
+ *
+ * Handling aliases.
+ *
+ */
+
+typedef struct alias{
+	char key[ALIAS_KEY_LEN];
+	char value[CMD_LEN];
+	struct alias* next;
+} Alias;
+
+FILE* alias_fh = NULL;
+Alias* alias_head = NULL;
+
+int add_alias(const char* key, const char* value){
+	Alias* new = malloc(sizeof(Alias));
+	if(!new)
+		return -1;
+
+	strcpy(new->key, key);
+	strcpy(new->value, value);
+	new->next = NULL;
+
+	if(alias_head){
+		Alias* temp = alias_head;
+		while(temp->next)
+			temp = temp->next;
+		temp->next = new;
+	}else{
+		alias_head = new;
+	}
+	return 0;
+}
+
+void del_alias(const char* key){
+	Alias* this = alias_head;
+	if(!this)
+		return;
+
+	if(strcmp(this->key, key) == 0){
+		alias_head = alias_head->next;
+		free(this);
+		return;
+	}
+
+	while(this->next){
+		if(strcmp(this->next->key, key) == 0){
+			// MATCH!
+			Alias* t = this->next;
+			this->next = this->next->next;
+			free(t);
+			return;
+		}else{
+			this = this->next;
+		}
+	}
+}
+
+void open_alias(){
+	const char* filename = "alias.data";
+	alias_fh = fopen(filename, "r");
+	if(alias_fh){
+		// FILE EXISTS // read data and store it as a linked list.
+		char key_buf[ALIAS_KEY_LEN];
+		char val_buf[CMD_LEN];
+
+		memset(key_buf, 0, ALIAS_KEY_LEN);
+		memset(val_buf, 0, CMD_LEN);
+
+		while(fgets(key_buf, ALIAS_KEY_LEN, alias_fh)){
+			// key is stored
+			key_buf[strlen(key_buf) - 1] = '\0';
+
+			// val is stored
+			fgets(val_buf, CMD_LEN, alias_fh);
+			val_buf[strlen(val_buf) - 1] = '\0';
+
+			// add to 'store'
+			add_alias(key_buf, val_buf);
+
+			memset(key_buf, 0, ALIAS_KEY_LEN);
+			memset(val_buf, 0, CMD_LEN);
+		}
+	}
+}
+
+void close_alias(){
+	// WRITE THE LINKED LIST BACK TO FILE
+	const char* filename = "alias.data";
+	alias_fh = fopen(filename, "w");
+	if(alias_fh){
+		// add a \n at the end of everything you write. dont Remove the null character (automatically done).
+		while(alias_head){
+			Alias* temp = alias_head;
+			char buf[CMD_LEN + 1];
+
+			strcpy(buf, alias_head->key);
+			buf[strlen(buf)] = '\n';
+			buf[strlen(buf) + 1] = '\0';
+			fputs(buf, alias_fh);
+
+			strcpy(buf, alias_head->value);
+			buf[strlen(buf)] = '\n';
+			buf[strlen(buf) + 1] = '\0';
+			fputs(buf, alias_fh);
+
+			alias_head = alias_head->next;
+			free(temp);
+		}
+	}
+}
+
+char* resolve_alias(const char* key){
+	Alias* index = alias_head;
+	while(index){
+		if (strcmp(index->key, key) == 0){
+			return index->value;
+		}
+		index = index->next;
+	}
+	return NULL;
+}
+
+// TODO: write correctly
+char* search_replace(char* command){
+	// receives something like foobar\n\0   --->    ls\n\0
+
+	char result[CMD_LEN];
+	int write_index = 0;
+
+	const char* tokens = " \t\n\r<>|;&";
+
+	char* start = command;
+	while((start < strlen(command)) && strchr(tokens, start)){
+		result[write_index] = *start;
+		write_index++;
+		start++;
+	}
+
+	char* end = start;
+	char* subcmd[CMD_LEN];
+
+	while (end < strlen(command)){
+		end = strchr(tokens, end);
+		if(!end){
+			end++;
+			continue;
+		}else {
+
+			// end is on a token
+
+			// subcmd is [start, end-1]
+			memcpy(subcmd, start, end-start);
+			subcmd[end-start] = '\0';
+
+			if(resolve_alias(subcmd)){
+				// ALIAS!
+			}else{
+				// NO ALIAS
+			}
+
+			end++;
+			start = end;
+			while((start < strlen(command)) && strchr(tokens, start)){
+				start++;
+			}
+			end = start;
+		}
+	}
+
+	return result;
+}
+
+
+/*
+ *
+ *
+ * Implementing non-buffered input from console
+ *
+ *
+ */
 
 static struct termios old, new;
 
@@ -53,8 +237,6 @@ char getch(void)
  *
  *
  */
-
-
 
 // COMMAND HISTORY STACK. Implemented as a linked-list
 typedef struct node{
@@ -259,43 +441,6 @@ void runcmd(struct cmd *cmd)
   exit(0);
 }
 
-/*
-int getcmd(char *buf, int nbuf, char* pwd, char* home)
-{
-
-  char display[1024];
-  strcpy(display, pwd);
-  if(strlen(display) >= strlen(home)){
-	  // check for occurrence
-	  int match = 1;
-	  for(int i = 0; i < strlen(home); i++){
-		  if (display[i] != home[i]){
-			  match = 0;
-			  break;
-		  }
-	  }
-
-	  // if match == 1?
-	  if (match == 1){
-		  memset(display, 0, 1024);
-		  display[0] = '~';
-		  strcpy(display+1, pwd + strlen(home));
-	  }
-  }
-
-
-
-  if (isatty(fileno(stdin))){
-      fprintf(stdout, "238P:%s$ ", display);
-  }
-
-  memset(buf, 0, nbuf);
-  fgets(buf, nbuf, stdin);
-  if(buf[0] == 0) // EOF
-    return -1;
-  return 0;
-}*/
-
 int getcmd(char *buf, int nbuf, char* pwd, char* home, Stack* commandstack)
 {
 
@@ -398,36 +543,40 @@ int getcmd(char *buf, int nbuf, char* pwd, char* home, Stack* commandstack)
   }
   // end of reading characters. (Reached EOF or newline).
 
-  // null terminate.
   buf[charcount] = '\0';
-
   if(buf[0] == 0) // EOF
     return -1;
+
   return 0;
 }
 
 
 int main(void)
 {
-
+  // TERMINAL init
   initTermios(0);
   static char buf[CMD_LEN];
   int r;
 
+  // STACK HISTORY init
   Stack* commandstack = malloc(sizeof(Stack));
   stackinit(commandstack);
 
+  // DIRECTORY BEAUTIFICATION init
   char pwd[1024];
   char *homed;
-
   homed = getenv("HOME");
   getcwd(pwd, sizeof(pwd));
 
+  // ALIAS init
+  open_alias();
 
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf), pwd, homed, commandstack) >= 0){
 
-	// ********** adding a command to the history
+	// resolve for aliases
+	search_replace(buf);
+
 	// [buf] is the command. contains a trailing newline character. ALSO NULL TERMINATED. So,    ls\n\0
 	char copy[strlen(buf) + 10];
 	strcpy(copy, buf);
@@ -435,7 +584,6 @@ int main(void)
 	addcommand(commandstack, copy);
 	// ********** added the command successfully
 
-	// TODO : directory beautification.
     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
 
       // DIRECTORY CHANGE.
