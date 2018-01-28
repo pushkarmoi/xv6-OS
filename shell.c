@@ -577,40 +577,80 @@ int main(void)
 	// resolve for aliases
 	search_replace(buf);
 
-	// [buf] is the command. contains a trailing newline character. ALSO NULL TERMINATED. So,    ls\n\0
+	// COMMAND HISTORY [buf] is the command. contains a trailing newline character. ALSO NULL TERMINATED. So,    ls\n\0
 	char copy[strlen(buf) + 10];
 	strcpy(copy, buf);
 	copy[strlen(copy) - 1] = '\0';
 	addcommand(commandstack, copy);
 	// ********** added the command successfully
 
-    if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
+	char* alias_cmd = "alias ";
+	char* unalias_cmd = "unalias ";
+	char* cd_cmd = "cd ";
 
-      // DIRECTORY CHANGE.
+	if(strlen(buf) > 6 && memcmp(alias_cmd, buf, 6) == 0){
+		// ALIAS
+		char key[ALIAS_KEY_LEN];
+		char value[CMD_LEN];
 
-      buf[strlen(buf)-1] = 0;  // chop the \n
+		//buf =  alias foobar="ls -l | grep d"
+		char* s = strchr(buf, ' ');
+		char* e = strchr(buf, '=');
 
-      char* home = "~";
-      if(strcmp(home, buf+3) == 0){
-    	  strcpy(buf+3, homed);
-      }
+		int len = e - s;  // number of chars in key
+		memcpy(key, buf + s, len);
+		key[len] = '\0';
 
-      if(chdir(buf+3) < 0)
-        fprintf(stderr, "cannot cd %s\n", buf+3);
-      else{
-    	getcwd(pwd, sizeof(pwd));
-      }
-    }else {
+		char* s = strchr(buf, '"') + 1;
+		char* e = strchr(buf + s, '"');
 
+		len = e - s;
+		memcpy(value, buf + s, len);
+		value[len] = '\0';
+
+
+		add_alias(key, value);
+
+	}else if(strlen(buf) > 8 && memcmp(unalias_cmd, buf, 8) == 0){
+		// UNALIAS
+
+		char key[ALIAS_KEY_LEN];
+
+		//buf = unalias foobar
+		char* s = strchr(buf, ' ') + 1;
+		char* e = buf + strlen(buf);
+
+		int len = e - s;
+		memcpy(key, buf + s, len);
+		key[len] = '\0';
+
+		del_alias(key);
+
+	}else if(strlen(buf) > 3 && memcmp(cd_cmd, buf, 3) == 0){
+		// CD
+	      // DIRECTORY CHANGE.
+	      buf[strlen(buf)-1] = 0;  // chop the \n
+	      char* home = "~";
+	      if(strcmp(home, buf+3) == 0){
+	    	  strcpy(buf+3, homed);
+	      }
+	      if(chdir(buf+3) < 0)
+	        fprintf(stderr, "cannot cd %s\n", buf+3);
+	      else{
+	    	getcwd(pwd, sizeof(pwd));
+	      }
+	}else{
+		// normal exec
         if(fork1() == 0)
         	runcmd(parsecmd(buf));
         wait(&r);
-    }
+	}
 
   }
 
   resetTermios();
   releasemem(commandstack);
+  alias_close();
   exit(0);
 }
 
