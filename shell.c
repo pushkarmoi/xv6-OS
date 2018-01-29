@@ -25,7 +25,6 @@ typedef struct alias{
 	struct alias* next;
 } Alias;
 
-FILE* alias_fh = NULL;
 Alias* alias_head = NULL;
 
 int add_alias(const char* key, const char* value){
@@ -74,7 +73,7 @@ void del_alias(const char* key){
 
 void open_alias(){
 	const char* filename = "alias.data";
-	alias_fh = fopen(filename, "r");
+	FILE* alias_fh = fopen(filename, "r");
 	if(alias_fh){
 		// FILE EXISTS // read data and store it as a linked list.
 		char key_buf[ALIAS_KEY_LEN];
@@ -97,13 +96,15 @@ void open_alias(){
 			memset(key_buf, 0, ALIAS_KEY_LEN);
 			memset(val_buf, 0, CMD_LEN);
 		}
+
+		fclose(alias_fh);
 	}
 }
 
 void close_alias(){
 	// WRITE THE LINKED LIST BACK TO FILE
 	const char* filename = "alias.data";
-	alias_fh = fopen(filename, "w");
+	FILE* alias_fh = fopen(filename, "w");
 	if(alias_fh){
 		// add a \n at the end of everything you write. dont Remove the null character (automatically done).
 		while(alias_head){
@@ -123,10 +124,11 @@ void close_alias(){
 			alias_head = alias_head->next;
 			free(temp);
 		}
+		fclose(alias_fh);
 	}
 }
 
-char* resolve_alias(const char* key){
+char* resolve_alias(char* key){
 	Alias* index = alias_head;
 	while(index){
 		if (strcmp(index->key, key) == 0){
@@ -137,54 +139,60 @@ char* resolve_alias(const char* key){
 	return NULL;
 }
 
-// TODO: write correctly
 char* search_replace(char* command){
-	// receives something like foobar\n\0   --->    ls\n\0
-
+	// receives something like:  "  cat -u file1| grep hello; top; foobar\n\0"
+	//printf("%s", command);
 	char result[CMD_LEN];
-	int write_index = 0;
+	strcpy(result, "");
 
+	const char* whitespace = " \t";
 	const char* tokens = " \t\n\r<>|;&";
+	const char* cmdsep = "|;&\n"; // add \n if not working
 
 	char* start = command;
-	while((start < strlen(command)) && strchr(tokens, start)){
-		result[write_index] = *start;
-		write_index++;
-		start++;
-	}
+	char* endofstring = start + strlen(command);
+	char subcmd[CMD_LEN];
 
-	char* end = start;
-	char* subcmd[CMD_LEN];
-
-	while (end < strlen(command)){
-		end = strchr(tokens, end);
-		if(!end){
-			end++;
-			continue;
-		}else {
-
-			// end is on a token
-
-			// subcmd is [start, end-1]
-			memcpy(subcmd, start, end-start);
-			subcmd[end-start] = '\0';
-
-			if(resolve_alias(subcmd)){
-				// ALIAS!
-			}else{
-				// NO ALIAS
-			}
-
-			end++;
-			start = end;
-			while((start < strlen(command)) && strchr(tokens, start)){
-				start++;
-			}
-			end = start;
+	while(start < endofstring){
+		//printf("****\n");
+		while((start < endofstring) && strchr(whitespace, *start)){
+			char temp[2] = {*start, '\0'};
+			strcat(result, temp);
+			start++;
 		}
+		char* end = start + 1;
+		while((end < endofstring) && !strchr(tokens, *end))
+			end++;
+
+			memcpy(subcmd, start, end - start);
+			subcmd[end - start] = '\0';
+			// resolve for alias -- subcmd.
+			char* alias =  resolve_alias(subcmd);
+			if(alias){
+				strcpy(subcmd, alias);
+			}
+			strcat(result, subcmd);	// adding the command to the result
+			//char temp[2] = {*end, '\0'};
+			//strcat(result, temp);
+
+		// this code is buggy  .>.
+		//end += 1;
+		start = end;
+		while((end < endofstring) && !strchr(cmdsep, *end)){
+			end++;
+		}
+
+		end += 1;
+		if (end <=endofstring){
+			memcpy(subcmd, start, end - start);
+			subcmd[end-start] = '\0';
+			strcat(result, subcmd);
+		}
+		start = end;
 	}
 
-	return result;
+	strcpy(command, result);
+	return command;
 }
 
 
@@ -209,7 +217,7 @@ void initTermios(int echo)
 }
 
 /* Restore old terminal i/o settings */
-void resetTermios(void)
+void resetTermios()
 {
   tcsetattr(0, TCSANOW, &old);
 }
@@ -295,10 +303,11 @@ char* getnext(Stack* commandstack){
 	return commandstack->current->command;
 }
 
+
 int addcommand(Stack* commandstack, const char* command){
 
-	commandstack->current = NULL;	// reset.
-	if (strcmp(command, "") == 0)
+	commandstack->current = NULL;   // reset current.
+	if (strcmp(command, "") == 0) // don't add empty characters to history
 		return 0;
 
 	Node* new = malloc(sizeof(Node));
@@ -380,7 +389,7 @@ void runcmd(struct cmd *cmd)
     // format> number of rows, 1st line name, 2nd line is
 
     execvp(ecmd->argv[0], ecmd->argv);
-    fprintf(stderr, "execvp couldn't be completed.\n");	// should not be executed
+    fprintf(stderr, "%s: couldn't be completed.\n", ecmd->argv[0]);	// should not be executed
     break;
 
   case '&':
@@ -441,8 +450,16 @@ void runcmd(struct cmd *cmd)
   exit(0);
 }
 
+void safeexit(Stack* commandstack){
+	  releasemem(commandstack);
+	  close_alias();
+	  exit(0);
+}
+
+
 int getcmd(char *buf, int nbuf, char* pwd, char* home, Stack* commandstack)
 {
+  int i;
 
   memset(buf, 0, nbuf);
   const int isterminal = isatty(fileno(stdin));
@@ -461,7 +478,7 @@ int getcmd(char *buf, int nbuf, char* pwd, char* home, Stack* commandstack)
   if(strlen(display) >= strlen(home)){
 	  // check for occurrence
 	  int match = 1;
-	  for(int i = 0; i < strlen(home); i++){
+	  for(i = 0; i < strlen(home); i++){
 		  if (display[i] != home[i]){
 			  match = 0;
 			  break;
@@ -479,11 +496,13 @@ int getcmd(char *buf, int nbuf, char* pwd, char* home, Stack* commandstack)
   int charcount = 0;
   while(charcount < (nbuf - 1)){
 
-	  //int c = fgetc(stdin);
 	  int c = getch();
 
-	  if (c == EOF)
+	  if (c == EOF){		// CTRL+D
+		  safeexit(commandstack);
 		  break;
+	  }
+
 	  if (c == '\n'){
 		  buf[charcount] = c;
 		  charcount++;
@@ -516,16 +535,19 @@ int getcmd(char *buf, int nbuf, char* pwd, char* home, Stack* commandstack)
 			  command = getprevious(commandstack);
 		  }else if(key == 'B'){
 			  command = getnext(commandstack);
+		  }else {
+			  // LEFT AND RIGHT arrows
+			  continue;
 		  }
 
 		  if (command){
 			  // erase previous chars, add new chars to screen
-			  for(int i = 0; i < charcount; i++)
+			  for(i = 0; i < charcount; i++)
 				  fprintf(stdout, "\b \b");
 
 			  // add new chars to screen AND buffer
 			  charcount = 0;
-			  for(int i = 0; i < strlen(command); i++){
+			  for(i = 0; i < strlen(command); i++){
 				  putchar(command[i]);
 				  buf[charcount] = command[i];
 				  charcount++;
@@ -550,11 +572,10 @@ int getcmd(char *buf, int nbuf, char* pwd, char* home, Stack* commandstack)
   return 0;
 }
 
-
 int main(void)
 {
   // TERMINAL init
-  initTermios(0);
+  //initTermios(0);
   static char buf[CMD_LEN];
   int r;
 
@@ -584,30 +605,35 @@ int main(void)
 	addcommand(commandstack, copy);
 	// ********** added the command successfully
 
+	char* exit_cmd = "exit";
 	char* alias_cmd = "alias ";
 	char* unalias_cmd = "unalias ";
 	char* cd_cmd = "cd ";
 
-	if(strlen(buf) > 6 && memcmp(alias_cmd, buf, 6) == 0){
+	if(strlen(buf) >= 4 && memcmp(exit_cmd, buf, 4) == 0){
+		safeexit(commandstack);
+	}else if(strlen(buf) > 6 && memcmp(alias_cmd, buf, 6) == 0){
 		// ALIAS
 		char key[ALIAS_KEY_LEN];
 		char value[CMD_LEN];
 
-		//buf =  alias foobar="ls -l | grep d"
-		char* s = strchr(buf, ' ');
+		//buf =  alias foobar="ls -l | grep d"\n\0
+		char* s = strchr(buf, ' ') + 1;
 		char* e = strchr(buf, '=');
 
 		int len = e - s;  // number of chars in key
-		memcpy(key, buf + s, len);
+		//memcpy(key, buf + s, len);
+		memcpy(key, s, len);
 		key[len] = '\0';
 
-		char* s = strchr(buf, '"') + 1;
-		char* e = strchr(buf + s, '"');
+		s = strchr(buf, '"') + 1;
+		//e = strchr(buf + s, '"');
+		e = strchr(s, '"');
 
 		len = e - s;
-		memcpy(value, buf + s, len);
+		//memcpy(value, buf + s, len);
+		memcpy(value, s, len);
 		value[len] = '\0';
-
 
 		add_alias(key, value);
 
@@ -616,12 +642,14 @@ int main(void)
 
 		char key[ALIAS_KEY_LEN];
 
-		//buf = unalias foobar
+		//buf = unalias foobar\n\0
 		char* s = strchr(buf, ' ') + 1;
-		char* e = buf + strlen(buf);
+		char* e = strchr(buf, '\n');
+		//char* e = buf + strlen(buf);
 
 		int len = e - s;
-		memcpy(key, buf + s, len);
+		//memcpy(key, buf + s, len);
+		memcpy(key, s, len);
 		key[len] = '\0';
 
 		del_alias(key);
@@ -648,10 +676,8 @@ int main(void)
 
   }
 
-  resetTermios();
-  releasemem(commandstack);
-  alias_close();
-  exit(0);
+  safeexit(commandstack);
+  //exit(0);
 }
 
 int
@@ -903,9 +929,3 @@ struct cmd* parseredirs(struct cmd *cmd, char **ps, char *es)
   }
   return cmd;
 }
-
-
-
-
-
-
