@@ -84,11 +84,13 @@ void open_alias(){
 
 		while(fgets(key_buf, ALIAS_KEY_LEN, alias_fh)){
 			// key is stored
-			key_buf[strlen(key_buf) - 1] = '\0';
+			if(key_buf[strlen(key_buf) - 1] == '\n')
+				key_buf[strlen(key_buf) - 1] = '\0';
 
 			// val is stored
 			fgets(val_buf, CMD_LEN, alias_fh);
-			val_buf[strlen(val_buf) - 1] = '\0';
+			if(val_buf[strlen(val_buf) - 1] == '\n')
+				val_buf[strlen(val_buf) - 1] = '\0';
 
 			// add to 'store'
 			add_alias(key_buf, val_buf);
@@ -129,7 +131,7 @@ void close_alias(){
 }
 
 char* resolve_alias(char* key){
-	Alias* index = alias_head;
+	Alias* index = alias_head;// CTRL+D
 	while(index){
 		if (strcmp(index->key, key) == 0){
 			return index->value;
@@ -498,7 +500,7 @@ int getcmd(char *buf, int nbuf, char* pwd, char* home, Stack* commandstack)
 
 	  int c = getch();
 
-	  if (c == EOF){		// CTRL+D
+	  if (c == EOF){
 		  safeexit(commandstack);
 		  break;
 	  }
@@ -595,6 +597,13 @@ int main(void)
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf), pwd, homed, commandstack) >= 0){
 
+	// add \n if not present (for ./a.out < commands)
+	if(buf[strlen(buf) - 1] != '\n'){
+		int index = strlen(buf) - 1;
+		buf[index] = '\n';
+		buf[index + 1] = '\0';
+	}
+
 	// resolve for aliases
 	search_replace(buf);
 
@@ -634,6 +643,9 @@ int main(void)
 		//memcpy(value, buf + s, len);
 		memcpy(value, s, len);
 		value[len] = '\0';
+
+
+		//fprintf(stdout, "%s: is the value", value);
 
 		add_alias(key, value);
 
@@ -929,3 +941,9 @@ struct cmd* parseredirs(struct cmd *cmd, char **ps, char *es)
   }
   return cmd;
 }
+
+
+
+
+
+
