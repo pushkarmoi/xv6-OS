@@ -71,46 +71,17 @@ void del_alias(const char* key){
 	}
 }
 
-void open_alias(){
-	const char* filename = "alias.data";
-	FILE* alias_fh = fopen(filename, "r");
-	if(alias_fh){
-		// FILE EXISTS // read data and store it as a linked list.
-		char key_buf[ALIAS_KEY_LEN];
-		char val_buf[CMD_LEN];
-
-		memset(key_buf, 0, ALIAS_KEY_LEN);
-		memset(val_buf, 0, CMD_LEN);
-
-		while(fgets(key_buf, ALIAS_KEY_LEN, alias_fh)){
-			// key is stored
-			if(key_buf[strlen(key_buf) - 1] == '\n')
-				key_buf[strlen(key_buf) - 1] = '\0';
-
-			// val is stored
-			fgets(val_buf, CMD_LEN, alias_fh);
-			if(val_buf[strlen(val_buf) - 1] == '\n')
-				val_buf[strlen(val_buf) - 1] = '\0';
-
-			// add to 'store'
-			add_alias(key_buf, val_buf);
-
-			memset(key_buf, 0, ALIAS_KEY_LEN);
-			memset(val_buf, 0, CMD_LEN);
-		}
-
-		fclose(alias_fh);
-	}
-}
 
 void close_alias(){
 	// WRITE THE LINKED LIST BACK TO FILE
-	const char* filename = "alias.data";
-	FILE* alias_fh = fopen(filename, "w");
-	if(alias_fh){
+	//const char* filename = "alias.data";
+	//FILE* alias_fh = fopen(filename, "w");
+	//if(alias_fh){
 		// add a \n at the end of everything you write. dont Remove the null character (automatically done).
 		while(alias_head){
 			Alias* temp = alias_head;
+
+			/*
 			char buf[CMD_LEN + 1];
 
 			strcpy(buf, alias_head->key);
@@ -121,13 +92,13 @@ void close_alias(){
 			strcpy(buf, alias_head->value);
 			buf[strlen(buf)] = '\n';
 			buf[strlen(buf) + 1] = '\0';
-			fputs(buf, alias_fh);
+			fputs(buf, alias_fh);*/
 
 			alias_head = alias_head->next;
 			free(temp);
 		}
-		fclose(alias_fh);
-	}
+		//fclose(alias_fh);
+	//}
 }
 
 char* resolve_alias(char* key){
@@ -426,11 +397,35 @@ void runcmd(struct cmd *cmd)
 	 break;
 
   case '|':
+
 	    pcmd = (struct pipecmd*)cmd;
 	    pipe(p);
 
-	    // already inside a fork..
-	    // so run the left command as a new process.
+	    if(fork1() == 0){	// make left command run as a child
+	    	struct cmd *leftcmd = pcmd->left;
+	    	close(1);
+	    	dup(p[1]);
+	    	close(p[0]);  // cannot write till the read end of pipe is open.
+	    	runcmd(leftcmd);
+	    }
+
+	    if (fork1() == 0){
+	    	struct cmd *rightcmd = pcmd->right;
+	    	close(0);
+	    	dup(p[0]);
+	    	close(p[1]);  // cannot read till the write end of pipe is open
+	    	runcmd(rightcmd);
+	    }
+
+	    close(p[0]);
+	    close(p[1]);
+	    wait(&r);
+	    wait(&r);
+
+	    break;
+	  	/*
+	    pcmd = (struct pipecmd*)cmd;
+	    pipe(p);
 
 	    if(fork1() == 0){	// make left command run as a child
 	    	struct cmd *leftcmd = pcmd->left;
@@ -439,8 +434,6 @@ void runcmd(struct cmd *cmd)
 	    	close(p[0]);  // cannot write till the read end of pipe is open.
 	    	runcmd(leftcmd);
 	    }else {
-	    	// PARENT WILL RUN HERE. That is, forked process in the shell
-	    	//wait(&r); //NO NEED. Both execute concurrently
 	    	struct cmd *rightcmd = pcmd->right;
 	    	close(0);
 	    	dup(p[0]);
@@ -448,6 +441,9 @@ void runcmd(struct cmd *cmd)
 	    	runcmd(rightcmd);
 	    }
 	    break;
+
+	    */
+
   }
   exit(0);
 }
@@ -503,6 +499,10 @@ int getcmd(char *buf, int nbuf, char* pwd, char* home, Stack* commandstack)
 	  if (c == EOF){
 		  safeexit(commandstack);
 		  break;
+	  }
+
+	  if (c == '\t'){	// TABS are disabled
+		  continue;
 	  }
 
 	  if (c == '\n'){
@@ -592,7 +592,7 @@ int main(void)
   getcwd(pwd, sizeof(pwd));
 
   // ALIAS init
-  open_alias();
+  //open_alias();
 
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf), pwd, homed, commandstack) >= 0){
@@ -619,33 +619,28 @@ int main(void)
 	char* unalias_cmd = "unalias ";
 	char* cd_cmd = "cd ";
 
-	if(strlen(buf) >= 4 && memcmp(exit_cmd, buf, 4) == 0){
+	if(buf[0] == '#'){
+		continue;
+	}else if(strlen(buf) >= 4 && memcmp(exit_cmd, buf, 4) == 0){
 		safeexit(commandstack);
 	}else if(strlen(buf) > 6 && memcmp(alias_cmd, buf, 6) == 0){
 		// ALIAS
 		char key[ALIAS_KEY_LEN];
 		char value[CMD_LEN];
 
-		//buf =  alias foobar="ls -l | grep d"\n\0
 		char* s = strchr(buf, ' ') + 1;
 		char* e = strchr(buf, '=');
 
 		int len = e - s;  // number of chars in key
-		//memcpy(key, buf + s, len);
 		memcpy(key, s, len);
 		key[len] = '\0';
 
-		s = strchr(buf, '"') + 1;
-		//e = strchr(buf + s, '"');
-		e = strchr(s, '"');
+		s = strchr(buf, '\'') + 1;
+		e = strchr(s, '\'');
 
 		len = e - s;
-		//memcpy(value, buf + s, len);
 		memcpy(value, s, len);
 		value[len] = '\0';
-
-
-		//fprintf(stdout, "%s: is the value", value);
 
 		add_alias(key, value);
 
@@ -654,13 +649,10 @@ int main(void)
 
 		char key[ALIAS_KEY_LEN];
 
-		//buf = unalias foobar\n\0
 		char* s = strchr(buf, ' ') + 1;
 		char* e = strchr(buf, '\n');
-		//char* e = buf + strlen(buf);
 
 		int len = e - s;
-		//memcpy(key, buf + s, len);
 		memcpy(key, s, len);
 		key[len] = '\0';
 
@@ -669,6 +661,7 @@ int main(void)
 	}else if(strlen(buf) > 3 && memcmp(cd_cmd, buf, 3) == 0){
 		// CD
 	      // DIRECTORY CHANGE.
+
 	      buf[strlen(buf)-1] = 0;  // chop the \n
 	      char* home = "~";
 	      if(strcmp(home, buf+3) == 0){
@@ -941,9 +934,3 @@ struct cmd* parseredirs(struct cmd *cmd, char **ps, char *es)
   }
   return cmd;
 }
-
-
-
-
-
-
